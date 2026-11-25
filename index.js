@@ -1,57 +1,50 @@
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
-const express = require('express');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-const QRCode = require('qrcode');
-
-const app = express();
-let ultimoQR = null;
-
-app.get('/', (req, res) => res.send('Bot activo - ve a /qr'));
-
-app.get('/qr', async (req, res) => {
-  if (!ultimoQR) return res.send('<h1>Esperando QR... recarga en 5 segundos</h1><script>setTimeout(()=>location.reload(),5000)</script>');
-  const img = await QRCode.toDataURL(ultimoQR);
-  res.send(`
-    <h1 style="text-align:center">Escanea este QR RAPIDO</h1>
-    <div style="text-align:center"><img src="${img}" style="width:340px;height:340px"></div>
-    <p style="text-align:center; font-size:18px">Tienes 20 segundos para escanearlo.<br>Si falla, NO escanees el mismo 2 veces.</p>
-    <div style="text-align:center"><button onclick="location.reload()" style="padding:10px 20px; font-size:18px">Recargar QR</button></div>
-  `);
-});
-
-app.listen(process.env.PORT || 3000, () => console.log('Server en 3000'));
 
 async function start() {
   const { state, saveCreds } = await useMultiFileAuthState('auth');
-  const { version } = await fetchLatestBaileysVersion();
-  const sock = makeWASocket({ 
-    version, 
-    auth: state, 
-    logger: pino({ level: 'silent' }), 
-    printQRInTerminal: false, 
-    browser: ['Chrome', 'Chrome', '1.0.0'] 
+  const sock = makeWASocket({
+    logger: pino({ level: 'silent' }),
+    auth: state,
+    printQRInTerminal: false,
+    browser: ['Mi Bot', 'Chrome', '1.0'],
   });
+
   sock.ev.on('creds.update', saveCreds);
+
+  // Si no está vinculado, pide código de emparejamiento
+  if (!sock.authState.creds.registered) {
+    setTimeout(async () => {
+      try {
+        const code = await sock.requestPairingCode('51929792392');
+        console.log('================================');
+        console.log('TU CODIGO ES: ' + code);
+        console.log('================================');
+        console.log('Ve a WhatsApp > Dispositivos vinculados > Vincular con numero de telefono y escribelo');
+      } catch (e) {
+        console.log('Error pidiendo codigo:', e.message);
+      }
+    }, 3000);
+  }
+
   sock.ev.on('connection.update', (update) => {
-    const connection = update.connection;
-    const qr = update.qr;
-    if (qr) { ultimoQR = qr; console.log('Nuevo QR generado'); }
-    if (connection === 'open') { ultimoQR = null; console.log('¡CONECTADO!'); }
-    if (connection === 'close') console.log('Desconectado');
+    const { connection, lastDisconnect } = update;
+    if (connection === 'close') {
+      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+      console.log('Conexion cerrada, reconectando:', shouldReconnect);
+      if (shouldReconnect) start();
+    } else if (connection === 'open') {
+      console.log('¡CONECTADO! Ya esta vinculado');
+    }
   });
-  sock.ev.on('messages.upsert', async (data) => {
-    const messages = data.messages;
-    const msg = messages[0];
-    if (!msg.message || msg.key.fromMe) return;
-    const from = msg.key.remoteJid;
-    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
-    const lower = text.toLowerCase().trim();
-    if (lower === 'hola' || lower === 'menu' || lower === '.menu') {
-      await sock.sendMessage(from, { text: 'Hola! Soy tu bot 🤖\n\nEscribe:\n.hola - Saludo\n.menu - Ver menu\n.info - Info del bot' });
-    } else if (lower === '.hola') {
-      await sock.sendMessage(from, { text: 'Hola! ¿Cómo estás? 😊' });
-    } else if (lower === '.info') {
-      await sock.sendMessage(from, { text: 'Bot creado con Baileys + Render' });
+
+  sock.ev.on('messages.upsert', async ({ messages }) => {
+    const m = messages[0];
+    if (!m.message || m.key.fromMe) return;
+    const text = m.message.conversation || m.message.extendedTextMessage?.text || '';
+    console.log('Mensaje:', text);
+    if (text.toLowerCase() === '!ping') {
+      await sock.sendMessage(m.key.remoteJid, { text: 'pong 🏓' });
     }
   });
 }
