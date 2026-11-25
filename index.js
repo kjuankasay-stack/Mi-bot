@@ -1,27 +1,29 @@
 const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const express = require('express');
 const pino = require('pino');
+const QRCode = require('qrcode');
+
 const app = express();
-let ultimoCodigo = 'Esperando codigo...';
-app.get('/', (req, res) => res.send('Bot activo - ve a /codigo'));
-app.get('/codigo', (req, res) => { res.send(`<h1 style="font-size:50px;text-align:center">TU CODIGO:<br>${ultimoCodigo}</h1><p style="text-align:center">Este codigo NO cambia. Si se vence, haz un Manual Deploy nuevo en Render</p>`); });
+let ultimoQR = null;
+
+app.get('/', (req, res) => res.send('Bot activo - ve a /qr'));
+app.get('/qr', async (req, res) => {
+  if (!ultimoQR) return res.send('<h1>Esperando QR... recarga en 5 segundos</h1><script>setTimeout(()=>location.reload(),5000)</script>');
+  const img = await QRCode.toDataURL(ultimoQR);
+  res.send(`<h1 style="text-align:center">Escanea este QR con WhatsApp</h1><div style="text-align:center"><img src="${img}" style="width:320px;height:320px"></div><p style="text-align:center">Se actualiza solo. No cierres esta pagina.</p><script>setTimeout(()=>location.reload(),15000)</script>`);
+});
 app.listen(process.env.PORT || 3000, () => console.log('Server en 3000'));
+
 async function start() {
   const { state, saveCreds } = await useMultiFileAuthState('auth');
   const { version } = await fetchLatestBaileysVersion();
   const sock = makeWASocket({ version, auth: state, logger: pino({ level: 'silent' }), printQRInTerminal: false, browser: ['Chrome', 'Chrome', '1.0.0'] });
   sock.ev.on('creds.update', saveCreds);
-  if (!state.creds.registered) {
-    setTimeout(async () => {
-      try {
-        const code = await sock.requestPairingCode('51929792392');
-        ultimoCodigo = code;
-        console.log('TU CODIGO ES:', code);
-      } catch (e) { console.log('Error:', e.message); }
-    }, 8000);
-  }
   sock.ev.on('connection.update', (update) => {
-    if (update.connection === 'open') { ultimoCodigo = '¡CONECTADO!'; console.log('¡Conectado!'); }
+    const { connection, qr } = update;
+    if (qr) { ultimoQR = qr; console.log('Nuevo QR generado'); }
+    if (connection === 'open') { ultimoQR = null; console.log('¡CONECTADO!'); }
+    if (connection === 'close') console.log('Desconectado');
   });
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0];
