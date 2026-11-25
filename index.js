@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const express = require('express');
 const pino = require('pino');
 
@@ -8,20 +8,21 @@ app.listen(process.env.PORT || 3000, () => console.log('Server en 3000'));
 
 async function start() {
   const { state, saveCreds } = await useMultiFileAuthState('auth');
-  const sock = makeWASocket({ auth: state, logger: pino({ level: 'silent' }), printQRInTerminal: false, browser: ['Chrome', 'Chrome', '1.0.0'] });
+  const { version } = await fetchLatestBaileysVersion();
+  console.log('Usando version de WhatsApp:', version);
+
+  const sock = makeWASocket({ version, auth: state, logger: pino({ level: 'silent' }), printQRInTerminal: false, browser: ['Chrome', 'Chrome', '1.0.0'] });
 
   sock.ev.on('creds.update', saveCreds);
 
-  // Si no está vinculado, pide código nuevo cada 25 segundos, sin apuro
   if (!state.creds.registered) {
     const numero = '51929792392';
     const pedirCodigo = async () => {
       try {
         const code = await sock.requestPairingCode(numero);
         console.log('TU CODIGO NUEVO ES:', code);
-        console.log('Usa este, si se vence espera al siguiente');
       } catch (e) {
-        console.log('Esperando para pedir otro codigo...');
+        console.log('Error pidiendo codigo:', e.message);
       }
     };
     setTimeout(pedirCodigo, 8000);
