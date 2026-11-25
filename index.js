@@ -8,29 +8,30 @@ app.listen(process.env.PORT || 3000, () => console.log('Server en 3000'));
 
 async function start() {
   const { state, saveCreds } = await useMultiFileAuthState('auth');
-  const sock = makeWASocket({ auth: state, logger: pino({ level: 'silent' }), printQRInTerminal: true });
+  const sock = makeWASocket({ auth: state, logger: pino({ level: 'silent' }), printQRInTerminal: false, browser: ['Chrome', 'Chrome', '1.0.0'] });
 
   sock.ev.on('creds.update', saveCreds);
 
-  // PARTE 2 ARREGLADA - acá estaba el punto que te dije que cambies por }
+  // Si no está vinculado, pide código nuevo cada 25 segundos, sin apuro
   if (!state.creds.registered) {
     const numero = '51929792392';
-    setTimeout(async () => {
+    const pedirCodigo = async () => {
       try {
         const code = await sock.requestPairingCode(numero);
-        console.log('TU CODIGO ES:', code);
+        console.log('TU CODIGO NUEVO ES:', code);
+        console.log('Usa este, si se vence espera al siguiente');
       } catch (e) {
-        console.log('Error pidiendo codigo:', e.message);
+        console.log('Esperando para pedir otro codigo...');
       }
-    }, 3000);
+    };
+    setTimeout(pedirCodigo, 8000);
+    setInterval(pedirCodigo, 25000);
   }
 
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect } = update;
     if (connection === 'close') {
-      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('Desconectado, reconectando...', shouldReconnect);
-      if (shouldReconnect) start();
+      console.log('Desconectado, codigo:', lastDisconnect?.error?.output?.statusCode);
     } else if (connection === 'open') {
       console.log('¡Conectado a WhatsApp!');
     }
@@ -41,10 +42,7 @@ async function start() {
     if (!msg.message || msg.key.fromMe) return;
     const from = msg.key.remoteJid;
     const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
-    console.log('Mensaje:', text);
-
     const lower = text.toLowerCase().trim();
-
     if (lower === 'hola' || lower === 'menu' || lower === '.menu') {
       await sock.sendMessage(from, { text: 'Hola! Soy tu bot 🤖\n\nEscribe:\n.hola - Saludo\n.menu - Ver menu\n.info - Info del bot' });
     } else if (lower === '.hola') {
