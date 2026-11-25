@@ -8,7 +8,15 @@ app.listen(process.env.PORT || 3000, () => console.log('Server en 3000'));
 
 async function start() {
   const { state, saveCreds } = await useMultiFileAuthState('auth');
-  const sock = makeWASocket({ auth: state, logger: pino({ level: 'silent' }), printQRInTerminal: true });
+  const sock = makeWASocket({ auth: state, logger: pino({ level: 'silent' }), printQRInTerminal: false, browser: ['Mi Bot', 'Chrome', '1.0'] });
+
+if (!state.creds.registered) {
+  const numero = '51929792392';
+  setTimeout(async () => {
+    const code = await sock.requestPairingCode(numero);
+    console.log('TU CODIGO ES:', code);
+  }, 3000);
+}
 
   sock.ev.on('creds.update', saveCreds);
 
